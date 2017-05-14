@@ -1,0 +1,7 @@
+*.csv
+*.tsv
+*.pyc
+*.py~
+*.tsv~
+*.jpg
+*.png
