@@ -13,13 +13,14 @@ import cPickle as pickle
 from PIL import Image
 from sklearn.neural_network import MLPClassifier
 from sklearn import datasets
-from sklearn import svm
+from sklearn.svm import SVC
 from sklearn.cross_validation import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn import grid_search
 from sklearn import cross_validation
 from sklearn.cross_validation import cross_val_score, KFold
 from preprocess import *
+from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import confusion_matrix
 from sklearn.preprocessing import LabelBinarizer
 from sklearn.multiclass import OneVsRestClassifier
@@ -37,29 +38,14 @@ def load_train_data(path_to_train_images, path_to_train_data):
     print('loading train data from csv...')
     data = pd.read_csv(path_to_train_data, sep=',')
 
-    '''
-    # label binarizer
-    # encode label to one hot representation
-    label = data['category_id'].as_matrix().reshape(data.shape[0], 1)
-    label_onehot = pd.DataFrame(LabelBinarizer().fit_transform(label))
-    data = pd.concat([data['file_name'], label_onehot], axis=1)
-    '''
-
     X = []
     y = []
     for row in data.iterrows():
-        # f, l = row[1]['file_name'], row[1].ix[1:].as_matrix().astype('int64') label binarizer
         f, l = row[1]['file_name'], row[1]['category_id']
         try:
-            # im = Image.open(os.path.join(path_to_train_images, f))
             im = cv2.imread(os.path.join(path_to_train_images, f))
-            if IS_CONTOUR:
-                im_contour = extract_clothes_color(im)
-                X.append(im_contour)
-                y.append(l)
-            else:
-                X.append(np.array(im).flatten())
-                y.append(l)
+            X.append(np.array(im).flatten())
+            y.append(l)
         except Exception as e:
             print(str(e))
 
@@ -71,41 +57,52 @@ def load_train_data(path_to_train_images, path_to_train_data):
 def inverse_onehot(vec):
     return np.where(vec)[1]
 
-
 def train_model(X, y):
     print('training the model ...')
-    # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.5, stratify=inverse_onehot(y))
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.5)
 
     # grid search
+    '''
+    parameters = {
+        'n_estimators': [100, 200, 300],
+        'max_features': [64, 128, 256],
+        'max_depth': [5, 10, None]
+    }
+    '''
+
     parameters = {
         'n_estimators': [100],
         'max_features': [64],
         'max_depth': [None]
     }
-    # cv = KFold(n=len(X_train), n_folds=5, shuffle=True) # label binarizer
-    # clf = grid_search.GridSearchCV(OneVsRestClassifier(RandomForestClassifier()), parameters, cv=cv, scoring='precision', n_jobs=-1) # label binarizer
-    # clf = grid_search.GridSearchCV(RandomForestClassifier(), parameters, cv=5, scoring='precision', n_jobs=-1)
-    clf = grid_search.GridSearchCV(RandomForestClassifier(), parameters, cv=5, n_jobs=-1)
+
+    '''
+    parameters = {
+        'C': [1],
+        'gamma': [0.001]
+    }
+    '''
+    clf = GridSearchCV(RandomForestClassifier(class_weight='balanced'), parameters, cv=5, n_jobs=-1, scoring='f1_weighted')
     clf.fit(X_train, y_train)
     test_score = clf.score(X_test, y_test)
     y_test_pred = clf.predict(X_test)
 
 
-    ''' # label binarizer
-    y_test_pred = clf.predict_proba(X_test)
-    y_test_pred = y_test_pred.argmax(axis=1)
-    y_test = y_test.argmax(axis=1)
-    '''
+    # visualization
+    fig = plt.figure(figsize=(10, 4))
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax2 = fig.add_subplot(1, 2, 2)
 
     conf_mat = confusion_matrix(y_test, y_test_pred, labels=range(23))
-    print conf_mat
-    print ("prediction from confusion matrix: {}").format(1.0 * np.diag(conf_mat).sum() / conf_mat.sum())
-    plt.matshow(conf_mat)
-    plt.colorbar()
-    plt.xlabel("Predicted label")
-    plt.ylabel("True label")
-    plt.savefig("confusion_matrix.jpg")
+    conf_norm = conf_mat.astype('float') / conf_mat.sum(axis=1)[:, np.newaxis]
+    print conf_norm
+    print ("prediction from confusion matrix: {}").format(1.0 * np.diag(conf_norm).sum() / conf_norm.sum())
+    ax1.matshow(conf_norm)
+    ax1.set_xlabel("Predicted label")
+    ax1.set_ylabel("True label")
+
+    ax2.hist(y_train, bins=24, range=(0, 23))
+    plt.savefig("static_info.jpg")
 
     # print result of grid search
     gs_max_features, gs_n_estimators, gs_max_depth = clf.best_params_.values()
@@ -115,6 +112,10 @@ def train_model(X, y):
     for params, mean_score, all_scores in clf.grid_scores_:
         print "{:.3f} (+/- {:.3f}) for {}".format(mean_score, all_scores.std() / 2, params)
     print "test score: {}".format(test_score)
+
+    # the number of image for each label
+    for i in range(24):
+        print('label {}: {}').format(i, y_test[y_test == i].shape[0])
 
     return clf
 
